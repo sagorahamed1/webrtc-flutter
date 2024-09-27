@@ -32,8 +32,11 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+//        sourceCompatibility = JavaVersion.VERSION_1_8
+//        targetCompatibility = JavaVersion.VERSION_1_8
+
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
     }
 
     defaultConfig {
@@ -54,6 +57,15 @@ android {
             signingConfig = signingConfigs.debug
         }
     }
+}
+
+// In the app-level build.gradle
+apply plugin: 'com.google.gms.google-services'
+
+dependencies {
+    // Add Google Play Services dependencies
+    implementation 'com.google.android.gms:play-services-auth:19.0.0' // or latest version
+    implementation 'com.google.firebase:firebase-auth:21.0.1' // or latest version
 }
 
 flutter {

@@ -1,7 +1,22 @@
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+        jcenter() // Add this if needed
+        maven { url 'https://maven.webrtc.org' } // WebRTC Maven repository
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:7.0.4'  // Use your appropriate gradle version
+        classpath 'com.google.gms:google-services:4.3.10'  // Correct version of google-services
+    }
+}
+
 allprojects {
     repositories {
         google()
         mavenCentral()
+        jcenter() // This is deprecated, so only include if necessary
+        maven { url 'https://maven.webrtc.org' } // WebRTC Maven repository
     }
 }
 

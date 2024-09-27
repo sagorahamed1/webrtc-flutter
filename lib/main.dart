@@ -1,8 +1,12 @@
-import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:webrtc_app/video_call.dart';
+
+import 'log_in_sign_up_screeb.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,232 +18,80 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter WebRTC',
-      home: AuthScreen(),
+      title: 'Flutter WebRTC App',
+      initialRoute: '/login',
+      routes: {
+        '/login': (context) => LoginPage(),
+        '/signup': (context) => SignupPage(),
+        '/home': (context) => HomePage(),
+        '/video-call': (context) => VideoCallPage(receiverId: ModalRoute.of(context)!.settings.arguments as String?),
+      },
     );
   }
 }
 
-// Authentication Screen (Sign Up & Sign In)
-class AuthScreen extends StatefulWidget {
+
+
+
+
+
+
+
+
+class HomePage extends StatefulWidget {
   @override
-  _AuthScreenState createState() => _AuthScreenState();
+  _HomePageState createState() => _HomePageState();
 }
 
-class _AuthScreenState extends State<AuthScreen> {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  bool isSignIn = true; // Toggle between SignIn and SignUp
-
-  Future<void> _signUp() async {
-    try {
-      UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
-          email: _emailController.text, password: _passwordController.text);
-      if (userCredential.user != null) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => VideoCallScreen()),
-        );
-      }
-    } catch (e) {
-      print('Error: $e');
-    }
-  }
-
-  Future<void> _signIn() async {
-    try {
-      UserCredential userCredential = await _auth.signInWithEmailAndPassword(
-          email: _emailController.text, password: _passwordController.text);
-      if (userCredential.user != null) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => VideoCallScreen()),
-        );
-      }
-    } catch (e) {
-      print('Error: $e');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(isSignIn ? 'Sign In' : 'Sign Up')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            TextField(
-              controller: _emailController,
-              decoration: InputDecoration(labelText: 'Email'),
-            ),
-            TextField(
-              controller: _passwordController,
-              decoration: InputDecoration(labelText: 'Password'),
-              obscureText: true,
-            ),
-            SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: isSignIn ? _signIn : _signUp,
-              child: Text(isSignIn ? 'Sign In' : 'Sign Up'),
-            ),
-            TextButton(
-              onPressed: () => setState(() => isSignIn = !isSignIn),
-              child: Text(isSignIn
-                  ? "Don't have an account? Sign Up"
-                  : "Already have an account? Sign In"),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// Video Call Screen
-class VideoCallScreen extends StatefulWidget {
-  @override
-  _VideoCallScreenState createState() => _VideoCallScreenState();
-}
-
-class _VideoCallScreenState extends State<VideoCallScreen> {
-  final TextEditingController roomIdController = TextEditingController();
-  RTCVideoRenderer _localRenderer = RTCVideoRenderer();
-  RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
-  RTCPeerConnection? _peerConnection;
-  bool _isCaller = false;
+class _HomePageState extends State<HomePage> {
+  final AuthService _authService = AuthService();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
 
   @override
   void initState() {
     super.initState();
-    _initializeRenderers();
-  }
-
-  Future<void> _initializeRenderers() async {
-    await _localRenderer.initialize();
-    await _remoteRenderer.initialize();
-  }
-
-  Future<void> _createRoom(String roomId) async {
-    _isCaller = true;
-    _peerConnection = await _createPeerConnection();
-
-    _peerConnection!.onIceCandidate = (RTCIceCandidate candidate) {
-      _sendIceCandidate(roomId, candidate);
-    };
-
-    RTCSessionDescription offer = await _peerConnection!.createOffer();
-    await _peerConnection!.setLocalDescription(offer);
-
-    await FirebaseFirestore.instance.collection('rooms').doc(roomId).set({
-      'offer': {
-        'sdp': offer.sdp,
-        'type': offer.type,
-      },
+    _firebaseMessaging.requestPermission();
+    _firebaseMessaging.getToken().then((token) {
+      // Save the user's FCM token in Firestore
+      _saveTokenToDatabase(token);
     });
-
-    FirebaseFirestore.instance.collection('rooms').doc(roomId).snapshots().listen((snapshot) async {
-      if (snapshot.data() != null && snapshot.data()!['answer'] != null) {
-        RTCSessionDescription answer = RTCSessionDescription(
-          snapshot.data()!['answer']['sdp'],
-          snapshot.data()!['answer']['type'],
-        );
-        await _peerConnection!.setRemoteDescription(answer);
-      }
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      // Handle the incoming notification
+      _showNotification(message);
     });
   }
 
-  Future<void> _joinRoom(String roomId) async {
-    DocumentSnapshot roomSnapshot = await FirebaseFirestore.instance.collection('rooms').doc(roomId).get();
-
-    if (roomSnapshot.exists) {
-      Map<String, dynamic> roomData = roomSnapshot.data() as Map<String, dynamic>;
-      RTCSessionDescription offer = RTCSessionDescription(roomData['offer']['sdp'], roomData['offer']['type']);
-
-      _peerConnection = await _createPeerConnection();
-      await _peerConnection!.setRemoteDescription(offer);
-      _peerConnection!.onIceCandidate = (RTCIceCandidate candidate) {
-        _sendIceCandidate(roomId, candidate);
-      };
-
-      RTCSessionDescription answer = await _peerConnection!.createAnswer();
-      await _peerConnection!.setLocalDescription(answer);
-
-      await FirebaseFirestore.instance.collection('rooms').doc(roomId).update({
-        'answer': {
-          'sdp': answer.sdp,
-          'type': answer.type,
-        },
-      });
-
-      FirebaseFirestore.instance.collection('rooms').doc(roomId).snapshots().listen((snapshot) {
-        // Handle ICE candidates
-      });
+  void _saveTokenToDatabase(String? token) async {
+    if (token != null) {
+      String uid = FirebaseAuth.instance.currentUser!.uid;
+      await _firestore.collection('users').doc(uid).set({
+        'fcmToken': token,
+      }, SetOptions(merge: true));
+      print("FCM Token saved: $token"); // Debug: print token
     }
   }
 
-  Future<RTCPeerConnection> _createPeerConnection() async {
-    Map<String, dynamic> configuration = {
-      'iceServers': [
-        {'urls': 'stun:stun.l.google.com:19302'}
-      ]
-    };
-
-    RTCPeerConnection peerConnection = await createPeerConnection(configuration);
-
-    MediaStream localStream = await navigator.mediaDevices.getUserMedia({
-      'audio': true,
-      'video': true,
-    });
-
-    localStream.getTracks().forEach((track) {
-      peerConnection.addTrack(track, localStream);
-    });
-
-    _localRenderer.srcObject = localStream;
-
-    peerConnection.onTrack = (RTCTrackEvent event) {
-      if (event.streams.isNotEmpty) {
-        _remoteRenderer.srcObject = event.streams[0];
-      }
-    };
-
-    return peerConnection;
-  }
-
-  void _sendIceCandidate(String roomId, RTCIceCandidate candidate) {
-    FirebaseFirestore.instance.collection('rooms').doc(roomId).collection('candidates').add({
-      'candidate': candidate.toMap(),
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text('Video Call')),
-      body: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              ElevatedButton(
-                onPressed: () => _createRoom(roomIdController.text),
-                child: Text('Create Room'),
-              ),
-              SizedBox(width: 10),
-              ElevatedButton(
-                onPressed: () => _joinRoom(roomIdController.text),
-                child: Text('Join Room'),
-              ),
-            ],
+  void _showNotification(RemoteMessage message) {
+    // Display a dialog or a snackbar with the message data
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Incoming Call'),
+        content: Text('${message.data['title']}: ${message.data['body']}'),
+        actions: [
+          TextButton(
+            child: Text('Accept'),
+            onPressed: () {
+              Navigator.pushNamed(context, '/video-call', arguments: message.data['callerId']);
+              Navigator.of(context).pop();
+            },
           ),
-          Expanded(
-            child: RTCVideoView(_localRenderer),
-          ),
-          Expanded(
-            child: RTCVideoView(_remoteRenderer),
+          TextButton(
+            child: Text('Decline'),
+            onPressed: () {
+              Navigator.of(context).pop();
+            },
           ),
         ],
       ),
@@ -247,10 +99,94 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   }
 
   @override
-  void dispose() {
-    _localRenderer.dispose();
-    _remoteRenderer.dispose();
-    _peerConnection?.dispose();
-    super.dispose();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Home'),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.logout),
+            onPressed: () async {
+              await _authService.signOut();
+              Navigator.pushReplacementNamed(context, '/login');
+            },
+          ),
+        ],
+      ),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: _firestore.collection('users').snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(child: Text('No users found'));
+          }
+
+          var users = snapshot.data!.docs;
+
+          return ListView.builder(
+            itemCount: users.length,
+            itemBuilder: (context, index) {
+              var user = users[index];
+              return ListTile(
+                title: Text(user['email']),
+                trailing: IconButton(
+                  icon: const Icon(Icons.video_call),
+                  onPressed: () {
+                    // Start a call with the selected user
+                    startCall(context, user.id);
+                  },
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  void startCall(BuildContext context, String receiverId) async {
+    // Create a new call document for the receiver
+    await FirebaseFirestore.instance.collection('calls').doc(receiverId).set({
+      'offer': null,
+      'isCalling': true,
+      'callerId': FirebaseAuth.instance.currentUser!.uid,
+    });
+
+    // Send a notification to the receiver
+    sendCallNotification(receiverId);
+
+    // Navigate to VideoCallPage
+    Navigator.pushNamed(context, '/video-call', arguments: receiverId);
+  }
+
+  void sendCallNotification(String receiverId) async {
+    // Get the FCM token of the receiver from Firestore
+    DocumentSnapshot receiverDoc = await _firestore.collection('users').doc(receiverId).get();
+    String? receiverToken = (receiverDoc.data() as Map<String, dynamic>?)?['fcmToken'];
+    if (receiverToken != null) {
+      // Send notification using your server or cloud function
+      await sendNotificationToServer(receiverToken, 'Incoming Call', 'You have an incoming call!', receiverId);
+    }
+  }
+
+  Future<void> sendNotificationToServer(String token, String title, String body, String callerId) async {
+    // Implement your server logic here, possibly using HTTP POST request to your server endpoint
+    print('Send notification to: $token, Title: $title, Body: $body, CallerId: $callerId');
+    // Example HTTP call to your server goes here
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
